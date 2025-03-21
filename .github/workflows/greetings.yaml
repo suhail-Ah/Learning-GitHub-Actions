@@ -39,4 +39,4 @@ jobs:
     steps:
     # Runs a single command using the runners shell
     - name: Send greeting
-      run: echo "Hello ${{ inputs.name }}" | echo "you are ${{inputs.age}} years old"
+      run: echo "Hello ${{ inputs.name }} \n you are ${{inputs.age}} years old"
