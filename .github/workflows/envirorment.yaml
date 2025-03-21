@@ -1,0 +1,37 @@
+name: Workflow with Manual Approval
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          echo "Building the project..."
+          # Add your build commands here
+
+  approval:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: chilling  # This targets a protected environment
+    steps:
+      - name: Approval Step
+        run: |
+          echo "Waiting for manual approval..."
+          echo "Approval granted! Proceeding with deployment..."
+
+#   deploy:
+#     needs: approval
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Deploy to Production
+#         run: |
+#           echo "Deploying to production..."
+#           # Add your deployment commands here
