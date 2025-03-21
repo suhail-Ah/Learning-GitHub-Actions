@@ -20,7 +20,7 @@ jobs:
   approval:
     needs: build
     runs-on: ubuntu-latest
-    environment: chilling  # This targets a protected environment
+    environment: production  # This targets a protected environment
     steps:
       - name: Approval Step
         run: |
