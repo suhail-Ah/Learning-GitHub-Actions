@@ -25,7 +25,7 @@ jobs:
       - name: Approval Step
         run: |
           echo "Waiting for manual approval..."
-          echo "Approval granted! Proceeding with deployment..."
+          echo "Approval granted! Proceeding with deployment.."
 
 #   deploy:
 #     needs: approval
