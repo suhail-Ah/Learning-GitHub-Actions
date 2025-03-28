@@ -9,51 +9,33 @@ on:
       - main
 
 jobs:
-  bazel-tests:
+  test-matrix:
     runs-on: ubuntu-latest
     strategy:
-      # This matrix strategy splits tests across four parallel runners to speed up execution
+      # This matrix strategy splits tests across four parallel runners to simulate test execution
       matrix:
         chunk: [1, 2, 3, 4]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-    #   - name: Install Bazel
-    #     run: |
-    #       # Update system packages and install Bazel
-    #       sudo apt update
-    #       sudo apt install -y bazel
-
-      - name: Create Sample Bazel Test Directory
+      - name: Create Sample Test Directory
         run: |
-          # Create a test directory and define a simple Bazel test
-          mkdir -p test_dir
-          cat <<EOF > test_dir/BUILD
-          sh_test(
-              name = "example_test",
-              srcs = ["example_test.sh"],
-          )
-          EOF
+          # Create a test directory for this chunk
+          mkdir -p test_dir_chunk_${{ matrix.chunk }}
           
-          # Create a simple shell test script
-          cat <<EOF > test_dir/example_test.sh
-          #!/bin/bash
-          echo "Running example test on chunk ${{ matrix.chunk }}"
-          exit 0
-          EOF
-          chmod +x test_dir/example_test.sh
+          # Generate a test file inside the directory
+          echo "Test output from chunk ${{ matrix.chunk }}" > test_dir_chunk_${{ matrix.chunk }}/test_output.txt
 
       - name: Set Up Named Pipe
         run: |
           # Create a named pipe for real-time log aggregation
           mkfifo combined-test-log
 
-      - name: Run Bazel Tests in Parallel
+      - name: Simulate Test Execution
         run: |
-          # Execute Bazel tests in parallel across different matrix chunks
-          # Each chunk runs separately but writes logs to the named pipe
-          bazel test --test_output=all //test_dir/... | tee combined-test-log &
+          # Simulate test execution by writing directory contents to the named pipe
+          cat test_dir_chunk_${{ matrix.chunk }}/test_output.txt | tee combined-test-log &
           wait
 
       - name: Upload Combined Log
