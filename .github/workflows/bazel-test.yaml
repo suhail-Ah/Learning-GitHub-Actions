@@ -1,4 +1,4 @@
-name: Bazel Test with Named Pipe
+name: Bazel Test with Combined Log
 
 on:
   push:
@@ -19,38 +19,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Create Sample Test Directory
+      - name: Create Sample Test Output
         run: |
-          # Create a test directory for this chunk
-          mkdir -p test_dir_chunk_${{ matrix.chunk }}
+          # Create a test output directory and file
+          mkdir -p test_results
           
-          # Generate a test file inside the directory
-          echo "Test output from chunk ${{ matrix.chunk }}" > test_dir_chunk_${{ matrix.chunk }}/test_output.txt
-
-      - name: Set Up Named Pipe
-        run: |
-          # Create a named pipe for real-time log aggregation
-          mkfifo combined-test-log
-
-      - name: Simulate Test Execution
-        run: |
-          # Start a background process that reads from the named pipe and writes to a log file
-          cat combined-test-log > final-test-report.log &
-
-          # Capture the process ID (PID) of 'cat' so we can stop it later
-          CAT_PID=$!
-
-          # Simulate test execution by writing output to the named pipe
-          echo "Test output from chunk ${{ matrix.chunk }}" > combined-test-log
-
-          # Close the named pipe by stopping the 'cat' process
-          kill $CAT_PID
-
+          # Generate a test file with chunk output
+          echo "Test output from chunk ${{ matrix.chunk }}" >> test_results/final-test-report.log
 
       - name: Upload Combined Log
         uses: actions/upload-artifact@v4
         with:
-          # Upload the aggregated test log specific to each chunk
-          # This allows easy debugging and review of test outputs
-          name: final-test-report-chunk-${{ matrix.chunk }}
-          path: combined-test-log
+          # Upload the aggregated test log
+          name: final-test-report
+          path: test_results/final-test-report.log
