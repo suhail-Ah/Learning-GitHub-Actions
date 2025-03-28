@@ -19,11 +19,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Bazel
-        run: |
-          # Update system packages and install Bazel
-          sudo apt update
-          sudo apt install -y bazel
+    #   - name: Install Bazel
+    #     run: |
+    #       # Update system packages and install Bazel
+    #       sudo apt update
+    #       sudo apt install -y bazel
 
       - name: Create Sample Bazel Test Directory
         run: |
