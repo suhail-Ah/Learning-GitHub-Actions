@@ -34,9 +34,18 @@ jobs:
 
       - name: Simulate Test Execution
         run: |
-          # Simulate test execution by writing directory contents to the named pipe
-          cat test_dir_chunk_${{ matrix.chunk }}/test_output.txt | tee combined-test-log &
-          wait
+          # Start a background process that reads from the named pipe and writes to a log file
+          cat combined-test-log > final-test-report.log &
+
+          # Capture the process ID (PID) of 'cat' so we can stop it later
+          CAT_PID=$!
+
+          # Simulate test execution by writing output to the named pipe
+          echo "Test output from chunk ${{ matrix.chunk }}" > combined-test-log
+
+          # Close the named pipe by stopping the 'cat' process
+          kill $CAT_PID
+
 
       - name: Upload Combined Log
         uses: actions/upload-artifact@v4
