@@ -150,6 +150,8 @@ jobs:
            head -c 500 jobs.json
            echo "..."
            echo ""
+
+           cat jobs.json
    
            # Parse clusters from setup job
            CLUSTERS='${{ needs.setup-clusters.outputs.matrix }}'
