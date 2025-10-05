@@ -28,9 +28,13 @@ jobs:
             {"cluster": {"name": "cluster-C", "region": "europe-west1"}}
           ]'
           
-          echo "matrix=$CLUSTERS" >> $GITHUB_OUTPUT
+          # Compact JSON into a single line to set as output
+          MATRIX=$(echo "$CLUSTERS" | jq -c .)
+          
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
           echo "Clusters configured:"
           echo "$CLUSTERS" | jq .
+
 
   # ============================================================================
   # Job 2: Deploy Applications (simulated with echo)
