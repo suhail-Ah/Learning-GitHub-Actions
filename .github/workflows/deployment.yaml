@@ -1,0 +1,342 @@
+name: Test Multi-Cluster Deployment
+
+on:
+  workflow_dispatch:  # Manual trigger for testing
+    inputs:
+      fail_cluster:
+        description: 'Cluster name to fail (leave empty for all success)'
+        required: false
+        default: ''
+
+jobs:
+  # ============================================================================
+  # Job 1: Setup - Define clusters
+  # ============================================================================
+  setup-clusters:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    
+    steps:
+      - name: Define cluster matrix
+        id: set-matrix
+        run: |
+          # Define 3 test clusters
+          CLUSTERS='[
+            {"cluster": {"name": "cluster-A", "region": "us-central1"}},
+            {"cluster": {"name": "cluster-B", "region": "us-east1"}},
+            {"cluster": {"name": "cluster-C", "region": "europe-west1"}}
+          ]'
+          
+          echo "matrix=$CLUSTERS" >> $GITHUB_OUTPUT
+          echo "Clusters configured:"
+          echo "$CLUSTERS" | jq .
+
+  # ============================================================================
+  # Job 2: Deploy Applications (simulated with echo)
+  # ============================================================================
+  application-deployment:
+    needs: setup-clusters
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        clusterName: ${{ fromJSON(needs.setup-clusters.outputs.matrix) }}
+    
+    # CRITICAL: Continue on error so other clusters aren't blocked
+    continue-on-error: true
+    
+    # Give each job a unique name
+    name: Deploy Apps - ${{ matrix.clusterName.cluster.name }}
+    
+    steps:
+      - name: Simulate application deployment
+        run: |
+          CLUSTER="${{ matrix.clusterName.cluster.name }}"
+          FAIL_CLUSTER="${{ github.event.inputs.fail_cluster }}"
+          
+          echo "================================================"
+          echo "🚀 Starting application deployment for: $CLUSTER"
+          echo "================================================"
+          
+          # Simulate deployment work
+          echo "Connecting to cluster: $CLUSTER"
+          echo "Region: ${{ matrix.clusterName.cluster.region }}"
+          sleep 2
+          
+          echo "Deploying application services..."
+          sleep 2
+          
+          # Simulate failure for specified cluster
+          if [[ "$CLUSTER" == "$FAIL_CLUSTER" ]]; then
+            echo "❌ ERROR: Deployment failed for $CLUSTER"
+            echo "Simulating deployment failure..."
+            exit 1
+          fi
+          
+          echo "✅ Application deployment completed successfully for $CLUSTER"
+
+  # ============================================================================
+  # Job 3: Deploy Listeners/Launchers (simulated with echo)
+  # ============================================================================
+  listener-deployment:
+    needs: [setup-clusters, application-deployment]
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        clusterName: ${{ fromJSON(needs.setup-clusters.outputs.matrix) }}
+    
+    # CRITICAL: Continue on error
+    continue-on-error: true
+    
+    name: Deploy Listeners - ${{ matrix.clusterName.cluster.name }}
+    
+    steps:
+      - name: Simulate listener deployment
+        run: |
+          CLUSTER="${{ matrix.clusterName.cluster.name }}"
+          
+          echo "================================================"
+          echo "🎧 Starting listener deployment for: $CLUSTER"
+          echo "================================================"
+          
+          # Simulate deployment work
+          echo "Connecting to cluster: $CLUSTER"
+          sleep 2
+          
+          echo "Deploying listener services..."
+          sleep 2
+          
+          echo "✅ Listener deployment completed successfully for $CLUSTER"
+
+  # ============================================================================
+  # Job 4: Track per-cluster status (THE MAGIC!)
+  # ============================================================================
+  track-cluster-status:
+    needs: [setup-clusters, application-deployment, listener-deployment]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    outputs:
+      cluster_statuses: ${{ steps.check-status.outputs.statuses }}
+    
+    steps:
+      - name: Check per-cluster deployment status
+        id: check-status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "================================================"
+          echo "📊 Tracking deployment status for all clusters"
+          echo "================================================"
+          
+          # Fetch all jobs for this workflow run
+          echo "Querying GitHub API for job details..."
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs \
+            > jobs.json
+          
+          echo "✅ Jobs data fetched"
+          echo ""
+          
+          # Parse clusters from setup job
+          CLUSTERS='${{ needs.setup-clusters.outputs.matrix }}'
+          
+          echo "Analyzing status for each cluster..."
+          echo ""
+          
+          # Create status JSON
+          echo "{" > cluster-statuses.json
+          
+          first=true
+          echo "$CLUSTERS" | jq -r '.[].cluster.name' | while IFS= read -r cluster; do
+            echo "-----------------------------------"
+            echo "Cluster: $cluster"
+            
+            # Find application deployment job for this cluster
+            APP_STATUS=$(jq -r --arg cluster "$cluster" \
+              '.jobs[] | select(.name | contains("Deploy Apps - " + $cluster)) | .conclusion' \
+              jobs.json)
+            
+            # Find listener deployment job for this cluster
+            LISTENER_STATUS=$(jq -r --arg cluster "$cluster" \
+              '.jobs[] | select(.name | contains("Deploy Listeners - " + $cluster)) | .conclusion' \
+              jobs.json)
+            
+            echo "  App Status: $APP_STATUS"
+            echo "  Listener Status: $LISTENER_STATUS"
+            
+            # Determine overall status
+            if [[ "$APP_STATUS" == "success" && "$LISTENER_STATUS" == "success" ]]; then
+              OVERALL="success"
+              ICON="✅"
+            elif [[ "$APP_STATUS" == "skipped" && "$LISTENER_STATUS" == "skipped" ]]; then
+              OVERALL="skipped"
+              ICON="⏭️"
+            else
+              OVERALL="failed"
+              ICON="❌"
+            fi
+            
+            echo "  Overall: $ICON $OVERALL"
+            
+            # Build JSON
+            if [ "$first" = true ]; then
+              first=false
+            else
+              echo "," >> cluster-statuses.json
+            fi
+            echo "  \"${cluster}\": \"${OVERALL}\"" >> cluster-statuses.json
+          done
+          
+          echo "}" >> cluster-statuses.json
+          
+          echo ""
+          echo "================================================"
+          echo "📋 Final Status Report:"
+          echo "================================================"
+          cat cluster-statuses.json | jq .
+          
+          # Set output for next job
+          echo "statuses=$(cat cluster-statuses.json | jq -c .)" >> $GITHUB_OUTPUT
+
+  # ============================================================================
+  # Job 5: Store artifacts per cluster (only if deployments succeeded)
+  # ============================================================================
+  store-artifacts:
+    needs: [setup-clusters, track-cluster-status]
+    if: |
+      !cancelled()
+      && needs.setup-clusters.result == 'success'
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        clusterName: ${{ fromJSON(needs.setup-clusters.outputs.matrix) }}
+    
+    name: Store Artifacts - ${{ matrix.clusterName.cluster.name }}
+    
+    steps:
+      - name: Check if cluster deployment succeeded
+        id: should-proceed
+        run: |
+          CLUSTER_NAME="${{ matrix.clusterName.cluster.name }}"
+          CLUSTER_STATUSES='${{ needs.track-cluster-status.outputs.cluster_statuses }}'
+          
+          echo "================================================"
+          echo "Checking status for: $CLUSTER_NAME"
+          echo "================================================"
+          echo "All cluster statuses:"
+          echo "$CLUSTER_STATUSES" | jq .
+          echo ""
+          
+          # Extract status for THIS cluster
+          STATUS=$(echo "$CLUSTER_STATUSES" | jq -r --arg cluster "$CLUSTER_NAME" '.[$cluster]')
+          
+          echo "Status for $CLUSTER_NAME: $STATUS"
+          echo ""
+          
+          if [[ "$STATUS" == "success" ]]; then
+            echo "✅ Cluster $CLUSTER_NAME deployments succeeded!"
+            echo "   → Proceeding with artifact storage"
+            echo "proceed=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  Cluster $CLUSTER_NAME deployments did not succeed (status: $STATUS)"
+            echo "   → Skipping artifact storage"
+            echo "proceed=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Simulate artifact storage
+        if: steps.should-proceed.outputs.proceed == 'true'
+        run: |
+          CLUSTER="${{ matrix.clusterName.cluster.name }}"
+          
+          echo "================================================"
+          echo "📦 Storing artifacts for: $CLUSTER"
+          echo "================================================"
+          
+          # Simulate creating release JSON
+          echo "Creating release JSON..."
+          cat > release.json <<EOF
+          {
+            "cluster": "$CLUSTER",
+            "region": "${{ matrix.clusterName.cluster.region }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "version": "1.0.0",
+            "status": "deployed"
+          }
+          EOF
+          
+          echo "Release JSON content:"
+          cat release.json
+          echo ""
+          
+          # Simulate upload to Artifactory
+          echo "Uploading to Artifactory..."
+          echo "URL: https://artifactory.example.com/releases/$CLUSTER/release.json"
+          sleep 1
+          
+          echo "✅ Artifacts stored successfully for $CLUSTER"
+      
+      - name: Log skipped cluster
+        if: steps.should-proceed.outputs.proceed == 'false'
+        run: |
+          CLUSTER="${{ matrix.clusterName.cluster.name }}"
+          echo "================================================"
+          echo "⏭️  SKIPPED: Artifact storage for $CLUSTER"
+          echo "================================================"
+          echo "Reason: Deployment did not complete successfully"
+          echo "Check the deployment logs for this cluster"
+
+  # ============================================================================
+  # Job 6: Summary Report
+  # ============================================================================
+  deployment-summary:
+    needs: [setup-clusters, application-deployment, listener-deployment, track-cluster-status, store-artifacts]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Generate deployment summary
+        run: |
+          echo "# 🚀 Multi-Cluster Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow Run:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          
+          FAIL_CLUSTER="${{ github.event.inputs.fail_cluster }}"
+          if [[ -n "$FAIL_CLUSTER" ]]; then
+            echo "**Simulated Failure:** $FAIL_CLUSTER" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Simulated Failure:** None (all clusters succeeded)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Setup Clusters | ${{ needs.setup-clusters.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Application Deployment | ${{ needs.application-deployment.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Listener Deployment | ${{ needs.listener-deployment.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Track Status | ${{ needs.track-cluster-status.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Store Artifacts | ${{ needs.store-artifacts.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Per-Cluster Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo '${{ needs.track-cluster-status.outputs.cluster_statuses }}' | jq . >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Key Points:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Jobs with 'success' status may contain per-cluster warnings" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts are only stored for clusters where both deployments succeeded" >> $GITHUB_STEP_SUMMARY
+          echo "- Failed clusters don't block successful clusters from storing artifacts" >> $GITHUB_STEP_SUMMARY
