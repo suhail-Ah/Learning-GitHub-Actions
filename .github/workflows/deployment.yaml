@@ -115,95 +115,101 @@ jobs:
   # ============================================================================
   # Job 4: Track per-cluster status (THE MAGIC!)
   # ============================================================================
-  track-cluster-status:
-    needs: [setup-clusters, application-deployment, listener-deployment]
-    if: always()
-    runs-on: ubuntu-latest
-    
-    outputs:
-      cluster_statuses: ${{ steps.check-status.outputs.statuses }}
-    
-    steps:
-      - name: Check per-cluster deployment status
-        id: check-status
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "================================================"
-          echo "📊 Tracking deployment status for all clusters"
-          echo "================================================"
-          
-          # Fetch all jobs for this workflow run
-          echo "Querying GitHub API for job details..."
-          gh api \
-            -H "Accept: application/vnd.github+json" \
-            /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs \
-            > jobs.json
-          
-          echo "✅ Jobs data fetched"
-          echo ""
-          
-          # Parse clusters from setup job
-          CLUSTERS='${{ needs.setup-clusters.outputs.matrix }}'
-          
-          echo "Analyzing status for each cluster..."
-          echo ""
-          
-          # Create status JSON
-          echo "{" > cluster-statuses.json
-          
-          first=true
-          echo "$CLUSTERS" | jq -r '.[].cluster.name' | while IFS= read -r cluster; do
-            echo "-----------------------------------"
-            echo "Cluster: $cluster"
-            
-            # Find application deployment job for this cluster
-            APP_STATUS=$(jq -r --arg cluster "$cluster" \
-              '.jobs[] | select(.name | contains("Deploy Apps - " + $cluster)) | .conclusion' \
-              jobs.json)
-            
-            # Find listener deployment job for this cluster
-            LISTENER_STATUS=$(jq -r --arg cluster "$cluster" \
-              '.jobs[] | select(.name | contains("Deploy Listeners - " + $cluster)) | .conclusion' \
-              jobs.json)
-            
-            echo "  App Status: $APP_STATUS"
-            echo "  Listener Status: $LISTENER_STATUS"
-            
-            # Determine overall status
-            if [[ "$APP_STATUS" == "success" && "$LISTENER_STATUS" == "success" ]]; then
-              OVERALL="success"
-              ICON="✅"
-            elif [[ "$APP_STATUS" == "skipped" && "$LISTENER_STATUS" == "skipped" ]]; then
-              OVERALL="skipped"
-              ICON="⏭️"
-            else
-              OVERALL="failed"
-              ICON="❌"
-            fi
-            
-            echo "  Overall: $ICON $OVERALL"
-            
-            # Build JSON
-            if [ "$first" = true ]; then
-              first=false
-            else
-              echo "," >> cluster-statuses.json
-            fi
-            echo "  \"${cluster}\": \"${OVERALL}\"" >> cluster-statuses.json
-          done
-          
-          echo "}" >> cluster-statuses.json
-          
-          echo ""
-          echo "================================================"
-          echo "📋 Final Status Report:"
-          echo "================================================"
-          cat cluster-statuses.json | jq .
-          
-          # Set output for next job
-          echo "statuses=$(cat cluster-statuses.json | jq -c .)" >> $GITHUB_OUTPUT
 
+  track-cluster-status:
+  needs: [setup-clusters, application-deployment, listener-deployment]
+  if: always()
+  runs-on: ubuntu-latest
+
+  outputs:
+    cluster_statuses: ${{ steps.check-status.outputs.statuses }}
+
+  steps:
+    - name: Check per-cluster deployment status (DEBUG VERSION)
+      id: check-status
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        echo "================================================"
+        echo "📊 TRACKING DEPLOYMENT STATUS FOR ALL CLUSTERS"
+        echo "================================================"
+
+        # Fetch all jobs for this workflow run
+        echo "Querying GitHub API for job details..."
+        gh api \
+          -H "Accept: application/vnd.github+json" \
+          /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs \
+          > jobs.json
+
+        echo "✅ Jobs data fetched"
+        echo "First 500 characters of jobs.json:"
+        head -c 500 jobs.json
+        echo "..."
+        echo ""
+
+        # Parse clusters from setup job
+        CLUSTERS='${{ needs.setup-clusters.outputs.matrix }}'
+        echo "Clusters fetched from setup job:"
+        echo "$CLUSTERS" | jq .
+        echo ""
+
+        # Create status JSON
+        echo "{" > cluster-statuses.json
+        first=true
+
+        echo "$CLUSTERS" | jq -r '.[].cluster.name' | while IFS= read -r cluster; do
+          echo "-----------------------------------"
+          echo "Processing cluster: $cluster"
+
+          # Find application deployment job for this cluster
+          APP_STATUS=$(jq -r --arg cluster "$cluster" \
+            '.jobs[] | select(.name | contains("Deploy Apps - " + $cluster)) | .conclusion' \
+            jobs.json)
+          echo "App deployment job conclusion for $cluster: $APP_STATUS"
+
+          # Find listener deployment job for this cluster
+          LISTENER_STATUS=$(jq -r --arg cluster "$cluster" \
+            '.jobs[] | select(.name | contains("Deploy Listeners - " + $cluster)) | .conclusion' \
+            jobs.json)
+          echo "Listener deployment job conclusion for $cluster: $LISTENER_STATUS"
+
+          # Determine overall status
+          if [[ "$APP_STATUS" == "success" && "$LISTENER_STATUS" == "success" ]]; then
+            OVERALL="success"
+            ICON="✅"
+          elif [[ "$APP_STATUS" == "skipped" && "$LISTENER_STATUS" == "skipped" ]]; then
+            OVERALL="skipped"
+            ICON="⏭️"
+          else
+            OVERALL="failed"
+            ICON="❌"
+          fi
+
+          echo "Determined overall status for $cluster: $ICON $OVERALL"
+
+          # Build JSON
+          if [ "$first" = true ]; then
+            first=false
+          else
+            echo "," >> cluster-statuses.json
+          fi
+          echo "  \"${cluster}\": \"${OVERALL}\"" >> cluster-statuses.json
+        done
+
+        echo "}" >> cluster-statuses.json
+
+        echo ""
+        echo "================================================"
+        echo "📋 FINAL CLUSTER STATUS REPORT (RAW JSON)"
+        echo "================================================"
+        cat cluster-statuses.json | jq .
+
+        echo ""
+        echo "➡️ Setting output for next job"
+        echo "statuses=$(cat cluster-statuses.json | jq -c .)" >> $GITHUB_OUTPUT
+
+        echo "✅ Track-cluster-status job completed successfully"
+    
   # ============================================================================
   # Job 5: Store artifacts per cluster (only if deployments succeeded)
   # ============================================================================
